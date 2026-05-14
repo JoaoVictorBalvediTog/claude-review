@@ -1,10 +1,15 @@
+# Inline PR review comments preview
+
 ### Comment 1
 **File:** app/page.tsx
 **Line:** 43
+**Side:** RIGHT
 
-`total` is computed as `subtotal * (DISCOUNT_PERCENT / 100)`, which gives only the discount amount (10% of the subtotal), not the discounted total. The displayed "Total" will always be less than the displayed "Discount" line, since both show the same value but the total should be the amount the customer actually pays.
+The `total` calculation is wrong — it computes the discount amount rather than the post-discount price. For a $100 subtotal this renders `$10.00` as the total instead of `$90.00`.
 
 Fix:
 ```ts
 const total = subtotal * (1 - DISCOUNT_PERCENT / 100);
 ```
+
+Note that the discount row in the JSX (line 150) already computes `subtotal * DISCOUNT_PERCENT / 100` correctly for display, so only this variable needs to change.
