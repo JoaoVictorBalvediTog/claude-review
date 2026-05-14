@@ -2,27 +2,30 @@
 
 - Claude exit code: 0
 - Claude JSON parse status: OK
+- Inline comment JSON parse status: OK
+- Valid inline comments: 0
+- Discarded inline comments: 2
 - Claude result subtype: success
 - Claude is_error: False
 - Model: not reported
 - Number of turns: 1
-- Duration ms: 5545
-- Total cost USD: 0.04931825
+- Duration ms: 266822
+- Total cost USD: 0.8170424000000001
 
 ## Input size
 
-- Review input bytes: 11927
-- Approx input tokens: 2981
+- Review input bytes: 271593
+- Approx input tokens: 67898
 
 ## Token usage reported by Claude
 
 - input_tokens: 2
-- cache_creation_input_tokens: 10275
-- cache_read_input_tokens: 12760
-- output_tokens: 128
+- cache_creation_input_tokens: 110658
+- cache_read_input_tokens: 12823
+- output_tokens: 19528
 - server_tool_use: {'web_search_requests': 0, 'web_fetch_requests': 0}
 - service_tier: standard
-- cache_creation: {'ephemeral_1h_input_tokens': 10275, 'ephemeral_5m_input_tokens': 0}
+- cache_creation: {'ephemeral_1h_input_tokens': 110658, 'ephemeral_5m_input_tokens': 0}
 - inference_geo: 
-- iterations: [{'input_tokens': 2, 'output_tokens': 128, 'cache_read_input_tokens': 12760, 'cache_creation_input_tokens': 10275, 'cache_creation': {'ephemeral_5m_input_tokens': 0, 'ephemeral_1h_input_tokens': 10275}, 'type': 'message'}]
+- iterations: [{'input_tokens': 2, 'output_tokens': 19528, 'cache_read_input_tokens': 12823, 'cache_creation_input_tokens': 110658, 'cache_creation': {'ephemeral_5m_input_tokens': 0, 'ephemeral_1h_input_tokens': 110658}, 'type': 'message'}]
 - speed: standard
