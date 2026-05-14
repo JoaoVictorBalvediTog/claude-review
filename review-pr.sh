@@ -205,8 +205,24 @@ print(repo)
 PY
 )"
 
+OUTPUT_ROOT="${OUTPUT_DIR}"
+SAFE_REPO_SLUG="$(printf '%s' "${API_REPO_SLUG}" | tr '/:' '__' | tr -cd 'A-Za-z0-9._-')"
+OUTPUT_DIR="${OUTPUT_ROOT}/${SAFE_REPO_SLUG}"
+
+REVIEW_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-review.md"
+REVIEW_INPUT_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-review-input.md"
+USAGE_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-usage.txt"
+CHANGED_FILES_CONTEXT_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}.changed-files-context.md"
+DIFF_TARGETS_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-inline-review-targets.json"
+INLINE_COMMENTS_JSON_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-inline-comments.json"
+INLINE_REVIEW_PAYLOAD_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-inline-review-payload.json"
+INLINE_REVIEW_RESPONSE_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-inline-review-response.json"
+
+mkdir -p "$OUTPUT_DIR"
+
 echo "GitHub API repo slug: ${API_REPO_SLUG}"
 echo "Run mode: ${RUN_MODE}"
+echo "Output directory: ${OUTPUT_DIR}"
 
 echo "Fetching PR metadata from ${API_REPO_SLUG} PR #${PR_NUMBER}..."
 
@@ -226,7 +242,7 @@ print(data.get("baseRefName") or "main")
 PY
 )"
 
-echo "Fetching PR diff from ${TARGET_REPO} PR #${PR_NUMBER}..."
+echo "Fetching PR diff from ${API_REPO_SLUG} PR #${PR_NUMBER}..."
 
 if ! gh pr diff "$PR_NUMBER" \
   --repo "$API_REPO_SLUG" \
@@ -670,7 +686,9 @@ print(decoded)
 PY
 
 CHANGED_FILES_CONTEXT_TEXT="# Changed Files Full Content"$'\n'
-CHANGED_FILES_CONTEXT_TEXT+=$'\n'"- Status: FETCHED_FROM_PR_HEAD"$'\n'
+CHANGED_FILES_CONTEXT_TEXT+=$'\n'"- Repository: ${API_REPO_SLUG}"$'\n'
+CHANGED_FILES_CONTEXT_TEXT+="- PR number: ${PR_NUMBER}"$'\n'
+CHANGED_FILES_CONTEXT_TEXT+="- Status: FETCHED_FROM_PR_HEAD"$'\n'
 CHANGED_FILES_CONTEXT_TEXT+="- Ref used: ${HEAD_REF}"$'\n'
 CHANGED_FILES_CONTEXT_TEXT+="- Max chars per file: ${MAX_CHANGED_FILE_CHARS_PER_FILE}"$'\n'
 CHANGED_FILES_CONTEXT_TEXT+="- Max total chars: ${MAX_CHANGED_FILES_TOTAL_CHARS}"$'\n'
@@ -792,6 +810,11 @@ PY
   echo "# Review Input"
   echo
   echo "This file is exactly the context passed to Claude through stdin."
+  echo
+  echo "Repository: ${API_REPO_SLUG}"
+  echo "PR number: ${PR_NUMBER}"
+  echo "Run mode: ${RUN_MODE}"
+  echo "Output directory: ${OUTPUT_DIR}"
   echo
   echo "Generated at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   echo
