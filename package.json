@@ -1,15 +1,38 @@
 {
-  "name": "reviewer",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "name": "claude-pr-reviewer",
+  "version": "0.1.0",
+  "description": "Reusable Claude-based GitHub pull request reviewer.",
   "type": "module",
+  "private": true,
+  "bin": {
+    "claude-pr-reviewer": "bin/claude-pr-reviewer.js"
+  },
+  "files": [
+    "action.yml",
+    "bin",
+    "src",
+    "lib",
+    "prompts",
+    "py",
+    "review-pr.sh",
+    "docs",
+    "README.md"
+  ],
+  "scripts": {
+    "check": "node --check bin/claude-pr-reviewer.js && node --check src/cli/init.js",
+    "test:init": "node bin/claude-pr-reviewer.js init --action-repo JoaoVictorBalvediTog/Reviewer --action-ref v1 --force",
+    "test": "npm run check"
+  },
+  "keywords": [
+    "github-actions",
+    "pull-request",
+    "reviewer",
+    "claude",
+    "anthropic",
+    "code-review"
+  ],
+  "author": "",
+  "license": "UNLICENSED",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.2",
     "@octokit/rest": "^22.0.1",
