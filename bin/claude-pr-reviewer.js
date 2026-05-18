@@ -30,7 +30,7 @@ Usage:
 Options:
   --force                 Overwrite existing workflow file.
   --action-repo <repo>    GitHub Action repository. Default: JoaoVictorBalvediTog/Reviewer
-  --action-ref <ref>      GitHub Action ref. Default: v1
+  --action-ref <ref>      GitHub Action ref. Default: main
   --workflow-name <name>  Workflow file name. Default: claude-pr-review.yml
 
 Examples:
