@@ -53,6 +53,23 @@ Rules for inline comments:
 - Do not mention the review process.
 - Do not use Markdown tables.
 
+Before writing any comment:
+- Verify the issue against the final changed file content, not only against the diff hunk.
+- If you claim something is missing, first check whether it already exists elsewhere in the same function, branch, handler, component, or relevant control flow.
+- Do not comment on a missing cleanup/reset/check if the final file already performs that cleanup/reset/check in the relevant branch.
+- Do not infer stale state, missing validation, or missing error handling from a single diff hunk when the full changed file content shows it is handled elsewhere.
+- The diff is for understanding what changed and choosing valid line targets. The changed file full content represents the final code state.
+- If the issue depends on a condition you cannot verify from the final file content, do not comment.
+
+Self-check each comment before output:
+For every comment, ask:
+1. Is this problem still present in the final changed file content?
+2. Can I point to the exact code path where it happens?
+3. Did I check whether the suggested fix already exists nearby or elsewhere in the same function?
+4. Would this comment still be valid if the reviewer reads the whole final file?
+
+If any answer is no, remove the comment.
+
 Output strict JSON only.
 Do not wrap the JSON in Markdown.
 Do not include prose before or after the JSON.
@@ -70,7 +87,19 @@ If there are comments to leave, output exactly this shape:
       "path": "path/to/file.tsx",
       "line": 123,
       "side": "RIGHT",
+      "severity": "blocking",
+      "confidence": "high",
       "body": "Actionable PR review comment. Explain the concrete issue, why it matters, and the minimal fix."
     }
   ]
 }
+
+Use severity:
+- blocking: security issue, runtime bug, data loss, auth/tenant leak, broken API contract.
+- non_blocking: real but lower-risk issue.
+- nit: do not output nits.
+
+Use confidence:
+- high only when the issue is directly verified in the final code.
+- medium only when strongly supported by code and PR context.
+- Do not output low-confidence comments.

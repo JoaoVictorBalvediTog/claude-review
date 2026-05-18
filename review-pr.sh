@@ -1009,9 +1009,28 @@ fi
 
 if [[ "$CLAUDE_EXIT" -ne 0 ]]; then
   echo "" >&2
-  echo "Claude review failed with exit code: $CLAUDE_EXIT" >&2
-  echo "Try increasing turns:" >&2
-  echo "CLAUDE_MAX_TOKENS=8192 review $API_REPO_SLUG $PR_NUMBER" >&2
+  echo "Claude review failed with HTTP status: $HTTP_STATUS" >&2
+
+  case "$HTTP_STATUS" in
+    400)
+      echo "Possible cause: invalid request payload or context too large." >&2
+      echo "Try reducing MAX_DIFF_CHARS or MAX_CHANGED_FILES_TOTAL_CHARS." >&2
+      ;;
+    401|403)
+      echo "Possible cause: invalid or missing ANTHROPIC_API_KEY." >&2
+      echo "Check the GitHub secret or local .env file." >&2
+      ;;
+    429)
+      echo "Possible cause: Anthropic rate limit." >&2
+      ;;
+    500|529)
+      echo "Possible cause: temporary Anthropic API/server overload." >&2
+      ;;
+    *)
+      echo "Check the Anthropic error payload above." >&2
+      ;;
+  esac
+
   exit "$CLAUDE_EXIT"
 fi
 
@@ -1023,7 +1042,7 @@ if [[ "$POST_INLINE_COMMENTS" == "1" ]]; then
   echo "GitHub review posting was enabled for this run."
 else
   echo "GitHub review posting is disabled by default."
-  echo "Use `comment review <repo> <pr_number>` to post comments or accepted review to the PR."
+  echo 'Use: comment review <repo> <pr_number>'
 fi
 echo ""
 echo "Fallback: to post the review as a regular PR timeline comment, pipe the output above with:"
