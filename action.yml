@@ -1,0 +1,48 @@
+name: Claude PR Reviewer
+description: Run Claude-based pull request review and comment results on GitHub.
+
+inputs:
+  repository:
+    description: GitHub repository slug, for example owner/repo.
+    required: true
+
+  pull_request_number:
+    description: Pull request number.
+    required: true
+
+  run_mode:
+    description: Reviewer execution mode.
+    required: false
+    default: comment_review
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout target repository
+      uses: actions/checkout@v4
+
+    - name: Checkout reviewer action
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ github.action_repository }}
+        ref: ${{ github.action_ref }}
+        path: .claude-pr-reviewer
+
+    - name: Validate environment
+      shell: bash
+      run: |
+        if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+          echo "ANTHROPIC_API_KEY is missing."
+          exit 1
+        fi
+
+        if [ -z "${GITHUB_TOKEN:-}" ]; then
+          echo "GITHUB_TOKEN is missing."
+          exit 1
+        fi
+
+    - name: Run Claude PR Reviewer
+      shell: bash
+      run: |
+        chmod +x .claude-pr-reviewer/review-pr.sh
+        .claude-pr-reviewer/review-pr.sh comment review "${{ inputs.repository }}" "${{ inputs.pull_request_number }}"
