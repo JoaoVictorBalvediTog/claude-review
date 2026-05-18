@@ -21,13 +21,6 @@ runs:
     - name: Checkout target repository
       uses: actions/checkout@v4
 
-    - name: Checkout reviewer action
-      uses: actions/checkout@v4
-      with:
-        repository: ${{ github.action_repository }}
-        ref: ${{ github.action_ref }}
-        path: .claude-pr-reviewer
-
     - name: Validate environment
       shell: bash
       run: |
@@ -44,5 +37,5 @@ runs:
     - name: Run Claude PR Reviewer
       shell: bash
       run: |
-        chmod +x .claude-pr-reviewer/review-pr.sh
-        .claude-pr-reviewer/review-pr.sh comment review "${{ inputs.repository }}" "${{ inputs.pull_request_number }}"
+        chmod +x "${{ github.action_path }}/review-pr.sh"
+        "${{ github.action_path }}/review-pr.sh" comment review "${{ inputs.repository }}" "${{ inputs.pull_request_number }}"
