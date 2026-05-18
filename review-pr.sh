@@ -854,7 +854,6 @@ PY
   echo "Repository: ${API_REPO_SLUG}"
   echo "PR number: ${PR_NUMBER}"
   echo "Run mode: ${RUN_MODE}"
-  echo "Output directory: ${OUTPUT_DIR}"
   echo
   echo "Generated at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   echo
@@ -996,7 +995,7 @@ if [[ "$CLAUDE_EXIT" -eq 0 ]]; then
   elif [[ "$INLINE_COMMENT_COUNT" != "0" ]]; then
     echo ""
     echo "Inline comments were generated but not posted."
-    echo "Review them first in: $REVIEW_FILE"
+    echo "Review them in the output above."
     echo ""
     echo "To post them to the PR diff, run:"
     echo "comment review $API_REPO_SLUG $PR_NUMBER"
