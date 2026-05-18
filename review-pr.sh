@@ -65,7 +65,8 @@ MAX_PR_BODY_CHARS="${MAX_PR_BODY_CHARS:-8000}"
 MAX_APP_CONTEXT_CHARS_PER_FILE="${MAX_APP_CONTEXT_CHARS_PER_FILE:-12000}"
 MAX_CHANGED_FILE_CHARS_PER_FILE="${MAX_CHANGED_FILE_CHARS_PER_FILE:-20000}"
 MAX_CHANGED_FILES_TOTAL_CHARS="${MAX_CHANGED_FILES_TOTAL_CHARS:-120000}"
-CLAUDE_MAX_TURNS="${CLAUDE_MAX_TURNS:-6}"
+CLAUDE_MODEL="${CLAUDE_MODEL:-claude-sonnet-4-5}"
+CLAUDE_MAX_TOKENS="${CLAUDE_MAX_TOKENS:-4096}"
 
 OUTPUT_DIR="${OUTPUT_DIR%/}"
 
@@ -100,7 +101,6 @@ need_cmd() {
 }
 
 need_cmd gh
-need_cmd claude
 need_cmd python3
 need_cmd curl
 
@@ -169,6 +169,11 @@ load_dotenv() {
 }
 
 load_dotenv
+
+if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+  echo "Erro: ANTHROPIC_API_KEY não definida. Defina-a em .env ou no ambiente." >&2
+  exit 1
+fi
 
 API_REPO_SLUG="$(python3 - "$TARGET_REPO" <<'PY'
 import re
@@ -615,7 +620,7 @@ print(data.get("headRefOid") or data.get("headRefName") or "")
 PY
 )"
 
-cat > "$TMP_DIR/_decode_file.py" <<'PY'
+cat > "$TMP_DIR/_decode_content.py" <<'PY'
 import base64
 import json
 import re
@@ -623,6 +628,7 @@ import sys
 
 json_path = sys.argv[1]
 max_chars = int(sys.argv[2])
+truncation_msg = sys.argv[3] if len(sys.argv) > 3 else "[Content truncated by script]"
 
 with open(json_path, "r", encoding="utf-8", errors="replace") as f:
     data = json.load(f)
@@ -650,90 +656,143 @@ for pattern in patterns:
     decoded = re.sub(pattern, r"\1[REDACTED_SECRET]", decoded, flags=re.IGNORECASE)
 
 if len(decoded) > max_chars:
-    decoded = decoded[:max_chars] + "\n\n[Changed file content truncated by script]"
+    decoded = decoded[:max_chars] + f"\n\n{truncation_msg}"
 
 print(decoded)
 PY
 
-cat > "$TMP_DIR/_decode_app_file.py" <<'PY'
+cat > "$TMP_DIR/_fetch_changed_files.py" <<'PY'
 import base64
+import concurrent.futures
 import json
+import re
+import subprocess
 import sys
+import urllib.parse
 
-json_path = sys.argv[1]
-max_chars = int(sys.argv[2])
+tsv_path, repo_slug, ref, pr_number, max_per_file, max_total, output_path = sys.argv[1:]
+max_per_file = int(max_per_file)
+max_total = int(max_total)
 
-with open(json_path, "r", encoding="utf-8") as f:
-    data = json.load(f)
+REDACT_PATTERNS = [
+    re.compile(r'((?:api[_-]?key|token|secret|password)\s*[:=]\s*["\']?)[^"\'\s]+', re.IGNORECASE),
+    re.compile(r'((?:ANTHROPIC_API_KEY|JIRA_API_TOKEN|GITHUB_TOKEN|GH_TOKEN)\s*=\s*)[^\s]+', re.IGNORECASE),
+    re.compile(r'((?:authorization:\s*bearer\s+))[a-z0-9._\-]+', re.IGNORECASE),
+]
 
-if isinstance(data, list):
-    print("[Skipped: path is a directory, not a file]")
-    sys.exit(0)
+def decode_github_content(data, max_chars):
+    if isinstance(data, list):
+        return None, "directory"
+    enc = data.get("encoding")
+    raw = data.get("content") or ""
+    if enc != "base64":
+        return None, f"unsupported encoding: {enc}"
+    decoded = base64.b64decode(raw).decode("utf-8", errors="replace")
+    for pat in REDACT_PATTERNS:
+        decoded = pat.sub(r"\1[REDACTED_SECRET]", decoded)
+    if len(decoded) > max_chars:
+        return decoded[:max_chars], "truncated"
+    return decoded, "ok"
 
-encoding = data.get("encoding")
-content = data.get("content") or ""
+files = []
+with open(tsv_path, encoding="utf-8") as f:
+    for line in f:
+        line = line.rstrip("\n")
+        if not line:
+            continue
+        parts = line.split("\t")
+        if parts[0]:
+            files.append({
+                "path": parts[0],
+                "change_type": parts[1] if len(parts) > 1 else "",
+                "additions": parts[2] if len(parts) > 2 else "",
+                "deletions": parts[3] if len(parts) > 3 else "",
+            })
 
-if encoding != "base64":
-    print("[Skipped: unsupported encoding]")
-    sys.exit(0)
+def fetch_one(args):
+    idx, info = args
+    path = info["path"]
+    enc_path = urllib.parse.quote(path, safe="/")
+    enc_ref = urllib.parse.quote(ref, safe="")
+    url = f"repos/{repo_slug}/contents/{enc_path}?ref={enc_ref}"
+    proc = subprocess.run(
+        ["gh", "api", "--method", "GET", url],
+        capture_output=True, text=True
+    )
+    return idx, proc.returncode == 0, proc.stdout
 
-decoded = base64.b64decode(content).decode("utf-8", errors="replace")
+print(f"Fetching {len(files)} changed file(s) in parallel...", flush=True)
 
-if len(decoded) > max_chars:
-    decoded = decoded[:max_chars] + "\n\n[Application context file truncated by script]"
+with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+    results = sorted(executor.map(fetch_one, enumerate(files)), key=lambda x: x[0])
 
-print(decoded)
+header = [
+    "# Changed Files Full Content",
+    "",
+    f"- Repository: {repo_slug}",
+    f"- PR number: {pr_number}",
+    "- Status: FETCHED_FROM_PR_HEAD",
+    f"- Ref used: {ref}",
+    f"- Max chars per file: {max_per_file}",
+    f"- Max total chars: {max_total}",
+]
+
+sections = []
+total_chars = sum(len(line) + 1 for line in header)
+
+for idx, success, stdout in results:
+    info = files[idx]
+    path = info["path"]
+
+    block = [
+        "",
+        f"## {path}",
+        "",
+        f"- Change type: {info['change_type'] or 'unknown'}",
+        f"- Additions: {info['additions'] or 'unknown'}",
+        f"- Deletions: {info['deletions'] or 'unknown'}",
+        "",
+    ]
+
+    if success:
+        try:
+            data = json.loads(stdout)
+            content, status = decode_github_content(data, max_per_file)
+            if content is not None:
+                block += ["```text", content, "```"]
+                if status == "truncated":
+                    block.append("[Changed file content truncated by script]")
+            else:
+                block.append(f"- Status: SKIPPED ({status})")
+        except Exception as exc:
+            block.append(f"- Status: DECODE_FAILED ({exc})")
+    else:
+        block += [
+            "- Status: FETCH_FAILED",
+            "- Reason: file may be deleted, renamed, binary, too large, or unavailable at PR head ref",
+        ]
+
+    chunk = "\n".join(block)
+    total_chars += len(chunk) + 1
+
+    if total_chars > max_total:
+        sections.append("\n[Changed files full content truncated by script]")
+        break
+
+    sections.append(chunk)
+
+with open(output_path, "w", encoding="utf-8") as f:
+    f.write("\n".join(header + sections) + "\n")
 PY
 
-CHANGED_FILES_CONTEXT_TEXT="# Changed Files Full Content"$'\n'
-CHANGED_FILES_CONTEXT_TEXT+=$'\n'"- Repository: ${API_REPO_SLUG}"$'\n'
-CHANGED_FILES_CONTEXT_TEXT+="- PR number: ${PR_NUMBER}"$'\n'
-CHANGED_FILES_CONTEXT_TEXT+="- Status: FETCHED_FROM_PR_HEAD"$'\n'
-CHANGED_FILES_CONTEXT_TEXT+="- Ref used: ${HEAD_REF}"$'\n'
-CHANGED_FILES_CONTEXT_TEXT+="- Max chars per file: ${MAX_CHANGED_FILE_CHARS_PER_FILE}"$'\n'
-CHANGED_FILES_CONTEXT_TEXT+="- Max total chars: ${MAX_CHANGED_FILES_TOTAL_CHARS}"$'\n'
-
-while IFS=$'\t' read -r changed_file change_type additions deletions; do
-  [[ -z "$changed_file" ]] && continue
-
-  echo "Fetching changed file content: ${changed_file}"
-
-  ENCODED_FILE="$(url_encode_path "$changed_file")"
-  ENCODED_REF="$(url_encode_value "$HEAD_REF")"
-
-  FILE_HASH="$(python3 - "$changed_file" <<'PY'
-import hashlib
-import sys
-print(hashlib.sha1(sys.argv[1].encode("utf-8")).hexdigest())
-PY
-)"
-
-  CHANGED_FILE_JSON="$TMP_DIR/changed-file-${FILE_HASH}.json"
-
-  CHANGED_FILES_CONTEXT_TEXT+=$'\n'"## ${changed_file}"$'\n\n'
-  CHANGED_FILES_CONTEXT_TEXT+="- Change type: ${change_type:-unknown}"$'\n'
-  CHANGED_FILES_CONTEXT_TEXT+="- Additions: ${additions:-unknown}"$'\n'
-  CHANGED_FILES_CONTEXT_TEXT+="- Deletions: ${deletions:-unknown}"$'\n\n'
-
-  if gh api --method GET "repos/${API_REPO_SLUG}/contents/${ENCODED_FILE}?ref=${ENCODED_REF}" > "$CHANGED_FILE_JSON" 2>/dev/null; then
-    FILE_TEXT="$(python3 "$TMP_DIR/_decode_file.py" "$CHANGED_FILE_JSON" "$MAX_CHANGED_FILE_CHARS_PER_FILE")"
-
-    CHANGED_FILES_CONTEXT_TEXT+='```text'$'\n'
-    CHANGED_FILES_CONTEXT_TEXT+="${FILE_TEXT}"$'\n'
-    CHANGED_FILES_CONTEXT_TEXT+='```'$'\n'
-  else
-    CHANGED_FILES_CONTEXT_TEXT+="- Status: FETCH_FAILED"$'\n'
-    CHANGED_FILES_CONTEXT_TEXT+="- Reason: file may be deleted, renamed, binary, too large, or unavailable at PR head ref"$'\n'
-  fi
-
-  if (( ${#CHANGED_FILES_CONTEXT_TEXT} > MAX_CHANGED_FILES_TOTAL_CHARS )); then
-    CHANGED_FILES_CONTEXT_TEXT="${CHANGED_FILES_CONTEXT_TEXT:0:$MAX_CHANGED_FILES_TOTAL_CHARS}"$'\n\n'"[Changed files full content truncated by script]"
-    break
-  fi
-done < "$CHANGED_FILES_LIST"
-
-mkdir -p "$(dirname "$CHANGED_FILES_CONTEXT_FILE")"
-printf '%s\n' "$CHANGED_FILES_CONTEXT_TEXT" > "$CHANGED_FILES_CONTEXT_FILE"
+python3 "$TMP_DIR/_fetch_changed_files.py" \
+  "$CHANGED_FILES_LIST" \
+  "$API_REPO_SLUG" \
+  "$HEAD_REF" \
+  "$PR_NUMBER" \
+  "$MAX_CHANGED_FILE_CHARS_PER_FILE" \
+  "$MAX_CHANGED_FILES_TOTAL_CHARS" \
+  "$CHANGED_FILES_CONTEXT_FILE"
 
 if [[ -z "${APP_CONTEXT_FILES:-}" ]]; then
   APP_CONTEXT_TEXT+=$'\n'"- Status: NOT_CONFIGURED"$'\n'
@@ -756,7 +815,7 @@ else
     APP_FILE_JSON="$TMP_DIR/app-context-$(printf '%s' "$app_file" | tr '/ ' '__').json"
 
     if gh api --method GET "repos/${API_REPO_SLUG}/contents/${ENCODED_FILE}?ref=${ENCODED_REF}" > "$APP_FILE_JSON" 2>/dev/null; then
-      FILE_TEXT="$(python3 "$TMP_DIR/_decode_app_file.py" "$APP_FILE_JSON" "$MAX_APP_CONTEXT_CHARS_PER_FILE")"
+      FILE_TEXT="$(python3 "$TMP_DIR/_decode_content.py" "$APP_FILE_JSON" "$MAX_APP_CONTEXT_CHARS_PER_FILE" "[Application context file truncated by script]")"
       APP_CONTEXT_TEXT+=$'\n'"## ${app_file}"$'\n\n'
       APP_CONTEXT_TEXT+='\```text'$'\n'
       APP_CONTEXT_TEXT+="${FILE_TEXT}"$'\n'
@@ -928,17 +987,61 @@ If there are comments to leave, output exactly this shape:
 }
 PROMPT
 
-echo "Running Claude review..."
+echo "Running Claude review via Anthropic API (model: ${CLAUDE_MODEL})..."
+
+printf '%s' "$REVIEW_PROMPT" > "$TMP_DIR/system-prompt.txt"
+
+python3 - "$TMP_DIR/system-prompt.txt" "$REVIEW_INPUT_FILE" \
+  "$TMP_DIR/api-request.json" "${CLAUDE_MODEL}" "${CLAUDE_MAX_TOKENS}" <<'PY'
+import json
+import sys
+
+system_path, input_path, output_path, model, max_tokens = \
+    sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], int(sys.argv[5])
+
+with open(system_path, encoding="utf-8") as f:
+    system_prompt = f.read()
+
+with open(input_path, encoding="utf-8") as f:
+    user_content = f.read()
+
+request = {
+    "model": model,
+    "max_tokens": max_tokens,
+    "system": [
+        {
+            "type": "text",
+            "text": system_prompt,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ],
+    "messages": [
+        {"role": "user", "content": user_content}
+    ],
+}
+
+with open(output_path, "w", encoding="utf-8") as f:
+    json.dump(request, f, ensure_ascii=False)
+PY
 
 set +e
-cat "$REVIEW_INPUT_FILE" | claude -p \
-  --max-turns "$CLAUDE_MAX_TURNS" \
-  --no-session-persistence \
-  --output-format json \
-  "$REVIEW_PROMPT" \
-  > "$CLAUDE_JSON_FILE"
+HTTP_STATUS=$(curl -sS \
+  -X POST "https://api.anthropic.com/v1/messages" \
+  -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "anthropic-beta: prompt-caching-2024-07-31" \
+  -H "content-type: application/json" \
+  --data-binary @"$TMP_DIR/api-request.json" \
+  -o "$CLAUDE_JSON_FILE" \
+  -w '%{http_code}')
 
-CLAUDE_EXIT=$?
+if [[ "$HTTP_STATUS" =~ ^2 ]]; then
+  CLAUDE_EXIT=0
+else
+  CLAUDE_EXIT=1
+  echo "Anthropic API error (HTTP ${HTTP_STATUS}):" >&2
+  cat "$CLAUDE_JSON_FILE" >&2
+fi
 set -e
 
 python3 - "$CLAUDE_JSON_FILE" "$REVIEW_FILE" "$USAGE_FILE" "$REVIEW_INPUT_FILE" "$CLAUDE_EXIT" "$DIFF_TARGETS_FILE" "$INLINE_COMMENTS_JSON_FILE" "$INLINE_REVIEW_PAYLOAD_FILE" "$PR_JSON_FILE" "$TMP_DIR/inline-comment-count.txt" <<'PY'
