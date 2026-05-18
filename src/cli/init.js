@@ -1,10 +1,10 @@
-const fs = require("fs");
-const path = require("path");
+import fs from "node:fs";
+import path from "node:path";
 
 function parseArgs(args) {
   const options = {
     force: false,
-    actionRepo: "empresa/claude-pr-reviewer",
+    actionRepo: "JoaoVictorBalvediTog/claude-review",
     actionRef: "v1",
     workflowName: "claude-pr-review.yml",
   };
@@ -79,7 +79,7 @@ jobs:
 `;
 }
 
-async function init(args) {
+export async function init(args) {
   const options = parseArgs(args);
 
   const rootDir = process.cwd();
@@ -126,7 +126,3 @@ async function init(args) {
 function relative(filePath) {
   return path.relative(process.cwd(), filePath).replaceAll(path.sep, "/");
 }
-
-module.exports = {
-  init,
-};
