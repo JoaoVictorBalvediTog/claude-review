@@ -1,68 +1,65 @@
-# PR Reviewer com Claude
+# Claude PR Reviewer
 
-Runner local para revisar pull requests no GitHub usando contexto da PR, Jira, arquivos alterados, diff e arquivos opcionais de contexto da aplicação.
+Automated pull request reviewer powered by Claude. Reads the PR context, diff, changed files, and optional Jira integration, then posts inline review comments on GitHub.
 
-## Comandos
+## How it works
+
+When a pull request is opened or updated, a GitHub Actions workflow runs the reviewer. It collects context (PR description, diff, Jira issue if configured) and calls Claude to produce a structured code review, which is posted directly on the PR.
+
+## Install
+
+Run this in the repository you want to enable reviews on:
 
 ```bash
+npm exec --yes --package git+ssh://git@github.com:JoaoVictorBalvediTog/claude-review.git#main -- claude-pr-reviewer init
+```
+
+This creates `.github/workflows/claude-pr-review.yml` in the current directory.
+
+### Required secret
+
+Add `ANTHROPIC_API_KEY` to your GitHub repository or organization secrets.
+
+### Next steps
+
+1. Commit the generated workflow file.
+2. Add `ANTHROPIC_API_KEY` in GitHub secrets.
+3. Open or update a pull request — the reviewer will run automatically.
+
+## Options
+
+```bash
+claude-pr-reviewer init --force                        # overwrite existing workflow
+claude-pr-reviewer init --action-ref v2                # pin to a specific release
+claude-pr-reviewer init --workflow-name my-review.yml  # custom workflow file name
+```
+
+## Jira integration
+
+Optional. When `JIRA_BASE_URL`, `JIRA_EMAIL`, and `JIRA_API_TOKEN` are set (as repo secrets or env vars), the reviewer fetches the Jira issue linked in the PR and includes it as context.
+
+## Local usage
+
+You can also run reviews locally:
+
+```bash
+# Preview review without posting to GitHub
 ./review-pr.sh review owner/repo 123
+
+# Generate and post review as a GitHub comment
 ./review-pr.sh comment review owner/repo 123
-./review-pr.sh owner/repo 123
 ```
-
-Atalhos opcionais:
-
-```bash
-ln -sf "$PWD/review-pr.sh" /usr/local/bin/review
-ln -sf "$PWD/review-pr.sh" /usr/local/bin/comment
-```
-
-Com atalhos:
-
-```bash
-review owner/repo 123
-comment review owner/repo 123
-```
-
-## Modos
-
-- `review`: gera preview local e não posta nada no GitHub.
-- `comment review`: gera a review e posta no GitHub.
-- modo legado `./review-pr.sh owner/repo 123`: mantém compatibilidade e não posta por padrão.
-
-## Estrutura
-
-```text
-review-pr.sh
-prompts/review_system_prompt.md
-py/parse_review_result.py
-.env.example
-outputs/
-```
-
-Jira é opcional. Quando `JIRA_BASE_URL`, `JIRA_EMAIL` e `JIRA_API_TOKEN` existem, o script tenta buscar a issue detectada na PR. Caso contrário, inclui no contexto que Jira não foi buscado.
 
 ## Outputs
 
-Os arquivos ficam em:
+Each run writes files under `outputs/<owner__repo>/`:
 
-```text
-outputs/<owner__repo>/
-```
-
-Principais arquivos:
-
-- `pr-<n>-review.md`: preview humano.
-- `pr-<n>-review-input.md`: contexto completo enviado ao Claude.
-- `pr-<n>-inline-comments.json`: comentários normalizados.
-- `pr-<n>-inline-review-payload.json`: payload enviado ao GitHub.
-- `pr-<n>-inline-review-response.json`: resposta do GitHub quando houver postagem.
-- `pr-<n>-usage.txt`: uso e diagnóstico.
-- `pr-<n>-review-status.txt`: `accepted` ou `comments`.
-
-## Validações locais
-
-```bash
-bash -n review-pr.sh
-python3 -m py_compile py/parse_review_result.py
-```
+| File | Description |
+|---|---|
+| `pr-<n>-review.md` | Human-readable review preview |
+| `pr-<n>-review-input.md` | Full context sent to Claude |
+| `pr-<n>-inline-comments.json` | Normalized inline comments |
+| `pr-<n>-inline-review-payload.json` | Payload sent to GitHub |
+| `pr-<n>-inline-review-response.json` | GitHub API response |
+| `pr-<n>-usage.txt` | Token usage and diagnostics |
+| `pr-<n>-review-status.txt` | `accepted` or `comments` |
