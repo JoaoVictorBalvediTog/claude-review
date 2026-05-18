@@ -1,0 +1,13 @@
+{
+  "commit_id": "4cb3c52121c305f177caccefa9965c201ce6b4dc",
+  "event": "COMMENT",
+  "body": "Claude inline review.",
+  "comments": [
+    {
+      "path": "app/page.tsx",
+      "line": 43,
+      "side": "RIGHT",
+      "body": "Critical bug: This calculates only 10% of the subtotal instead of applying a 10% discount. The total will be much lower than intended (e.g., $100 subtotal becomes $10 instead of $90). Fix: `const total = subtotal * (1 - DISCOUNT_PERCENT / 100);`"
+    }
+  ]
+}
