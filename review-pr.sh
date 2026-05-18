@@ -264,8 +264,8 @@ with open(raw_path, "r", encoding="utf-8", errors="replace") as f:
     text = f.read()
 
 patterns = [
-    r'((?:api[_-]?key|token|secret|password)\s*[:=]\s*["\']?)[^"\'\s]+',
-    r'((?:ANTHROPIC_API_KEY|JIRA_API_TOKEN|GITHUB_TOKEN|GH_TOKEN)\s*=\s*)[^\s]+',
+    r'((?:api[_-]?key|token|secret|password)\s*[:=]\s*["\']?)(?!\$\{\{)[^"\'\s]+',
+    r'((?:ANTHROPIC_API_KEY|JIRA_API_TOKEN|GITHUB_TOKEN|GH_TOKEN)\s*=\s*)(?!\$\{\{)[^\s]+',
     r'((?:authorization:\s*bearer\s+))[a-z0-9._\-]+',
 ]
 
@@ -628,8 +628,8 @@ if encoding != "base64":
 decoded = base64.b64decode(content).decode("utf-8", errors="replace")
 
 patterns = [
-    r'((?:api[_-]?key|token|secret|password)\s*[:=]\s*["\']?)[^"\'\s]+',
-    r'((?:ANTHROPIC_API_KEY|JIRA_API_TOKEN|GITHUB_TOKEN|GH_TOKEN)\s*=\s*)[^\s]+',
+    r'((?:api[_-]?key|token|secret|password)\s*[:=]\s*["\']?)(?!\$\{\{)[^"\'\s]+',
+    r'((?:ANTHROPIC_API_KEY|JIRA_API_TOKEN|GITHUB_TOKEN|GH_TOKEN)\s*=\s*)(?!\$\{\{)[^\s]+',
     r'((?:authorization:\s*bearer\s+))[a-z0-9._\-]+',
 ]
 
@@ -656,8 +656,8 @@ max_per_file = int(max_per_file)
 max_total = int(max_total)
 
 REDACT_PATTERNS = [
-    re.compile(r'((?:api[_-]?key|token|secret|password)\s*[:=]\s*["\']?)[^"\'\s]+', re.IGNORECASE),
-    re.compile(r'((?:ANTHROPIC_API_KEY|JIRA_API_TOKEN|GITHUB_TOKEN|GH_TOKEN)\s*=\s*)[^\s]+', re.IGNORECASE),
+    re.compile(r'((?:api[_-]?key|token|secret|password)\s*[:=]\s*["\']?)(?!\$\{\{)[^"\'\s]+', re.IGNORECASE),
+    re.compile(r'((?:ANTHROPIC_API_KEY|JIRA_API_TOKEN|GITHUB_TOKEN|GH_TOKEN)\s*=\s*)(?!\$\{\{)[^\s]+', re.IGNORECASE),
     re.compile(r'((?:authorization:\s*bearer\s+))[a-z0-9._\-]+', re.IGNORECASE),
 ]
 

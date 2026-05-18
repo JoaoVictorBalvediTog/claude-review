@@ -108,6 +108,7 @@ def main() -> int:
 
     valid_comments: list[dict[str, Any]] = []
     discarded_comments: list[dict[str, Any]] = []
+    seen_targets: set[tuple[str, int, str]] = set()
 
     for item in comments_json.get("comments") or []:
         if not isinstance(item, dict):
@@ -134,6 +135,11 @@ def main() -> int:
             discarded_comments.append({"reason": "target_not_in_diff", "comment": item})
             continue
 
+        if (path, line, side) in seen_targets:
+            discarded_comments.append({"reason": "duplicate_target", "comment": item})
+            continue
+
+        seen_targets.add((path, line, side))
         valid_comments.append({"path": path, "line": line, "side": side, "body": body})
 
     status = "comments" if valid_comments else "accepted"
