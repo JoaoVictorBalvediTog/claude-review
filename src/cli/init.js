@@ -5,7 +5,7 @@ function parseArgs(args) {
   const options = {
     force: false,
     actionRepo: "JoaoVictorBalvediTog/claude-review",
-    actionRef: "v1",
+    actionRef: "main",
     workflowName: "claude-pr-review.yml",
   };
 
