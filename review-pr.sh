@@ -60,8 +60,6 @@ case "$SCRIPT_NAME" in
     ;;
 esac
 
-OUTPUT_DIR="${OUTPUT_DIR:-outputs}"
-
 MAX_DIFF_CHARS="${MAX_DIFF_CHARS:-30000}"
 MAX_PR_BODY_CHARS="${MAX_PR_BODY_CHARS:-8000}"
 MAX_APP_CONTEXT_CHARS_PER_FILE="${MAX_APP_CONTEXT_CHARS_PER_FILE:-12000}"
@@ -70,25 +68,21 @@ MAX_CHANGED_FILES_TOTAL_CHARS="${MAX_CHANGED_FILES_TOTAL_CHARS:-120000}"
 CLAUDE_MODEL="${CLAUDE_MODEL:-claude-sonnet-4-5}"
 CLAUDE_MAX_TOKENS="${CLAUDE_MAX_TOKENS:-4096}"
 
-OUTPUT_DIR="${OUTPUT_DIR%/}"
-
-REVIEW_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-review.md"
-REVIEW_INPUT_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-review-input.md"
-USAGE_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-usage.txt"
-CHANGED_FILES_CONTEXT_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}.changed-files-context.md"
-DIFF_TARGETS_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-inline-review-targets.json"
-INLINE_COMMENTS_JSON_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-inline-comments.json"
-INLINE_REVIEW_PAYLOAD_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-inline-review-payload.json"
-INLINE_REVIEW_RESPONSE_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-inline-review-response.json"
-REVIEW_STATUS_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-review-status.txt"
-
-mkdir -p "$OUTPUT_DIR"
-
 TMP_DIR="$(mktemp -d)"
 cleanup() {
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
+
+REVIEW_FILE="$TMP_DIR/pr-${PR_NUMBER}-review.md"
+REVIEW_INPUT_FILE="$TMP_DIR/pr-${PR_NUMBER}-review-input.md"
+USAGE_FILE="$TMP_DIR/pr-${PR_NUMBER}-usage.txt"
+CHANGED_FILES_CONTEXT_FILE="$TMP_DIR/pr-${PR_NUMBER}.changed-files-context.md"
+DIFF_TARGETS_FILE="$TMP_DIR/pr-${PR_NUMBER}-inline-review-targets.json"
+INLINE_COMMENTS_JSON_FILE="$TMP_DIR/pr-${PR_NUMBER}-inline-comments.json"
+INLINE_REVIEW_PAYLOAD_FILE="$TMP_DIR/pr-${PR_NUMBER}-inline-review-payload.json"
+INLINE_REVIEW_RESPONSE_FILE="$TMP_DIR/pr-${PR_NUMBER}-inline-review-response.json"
+REVIEW_STATUS_FILE="$TMP_DIR/pr-${PR_NUMBER}-review-status.txt"
 
 PR_JSON_FILE="$TMP_DIR/pr.metadata.json"
 RAW_DIFF_FILE="$TMP_DIR/pr.raw.diff"
@@ -213,25 +207,8 @@ print(repo)
 PY
 )"
 
-OUTPUT_ROOT="${OUTPUT_DIR}"
-SAFE_REPO_SLUG="$(printf '%s' "${API_REPO_SLUG}" | tr '/:' '__' | tr -cd 'A-Za-z0-9._-')"
-OUTPUT_DIR="${OUTPUT_ROOT}/${SAFE_REPO_SLUG}"
-
-REVIEW_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-review.md"
-REVIEW_INPUT_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-review-input.md"
-USAGE_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-usage.txt"
-CHANGED_FILES_CONTEXT_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}.changed-files-context.md"
-DIFF_TARGETS_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-inline-review-targets.json"
-INLINE_COMMENTS_JSON_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-inline-comments.json"
-INLINE_REVIEW_PAYLOAD_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-inline-review-payload.json"
-INLINE_REVIEW_RESPONSE_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-inline-review-response.json"
-REVIEW_STATUS_FILE="${OUTPUT_DIR}/pr-${PR_NUMBER}-review-status.txt"
-
-mkdir -p "$OUTPUT_DIR"
-
 echo "GitHub API repo slug: ${API_REPO_SLUG}"
 echo "Run mode: ${RUN_MODE}"
-echo "Output directory: ${OUTPUT_DIR}"
 
 echo "Fetching PR metadata from ${API_REPO_SLUG} PR #${PR_NUMBER}..."
 
@@ -993,11 +970,6 @@ python3 "${SCRIPT_DIR}/py/parse_review_result.py" \
 
 cat "$REVIEW_FILE"
 
-echo ""
-echo "Review saved to: $REVIEW_FILE"
-echo "Review input/context saved to: $REVIEW_INPUT_FILE"
-echo "Inline comments JSON saved to: $INLINE_COMMENTS_JSON_FILE"
-echo "Inline review payload saved to: $INLINE_REVIEW_PAYLOAD_FILE"
 
 INLINE_COMMENT_COUNT="$(cat "$TMP_DIR/inline-comment-count.txt" 2>/dev/null || echo "0")"
 
@@ -1021,7 +993,6 @@ if [[ "$CLAUDE_EXIT" -eq 0 ]]; then
       > "$INLINE_REVIEW_RESPONSE_FILE"
 
     echo "GitHub review posted."
-    echo "GitHub response saved to: $INLINE_REVIEW_RESPONSE_FILE"
   elif [[ "$INLINE_COMMENT_COUNT" != "0" ]]; then
     echo ""
     echo "Inline comments were generated but not posted."
@@ -1056,5 +1027,18 @@ else
   echo "Use `comment review <repo> <pr_number>` to post comments or accepted review to the PR."
 fi
 echo ""
-echo "Fallback: to post the preview as a regular PR timeline comment, run:"
-echo "gh pr comment $PR_NUMBER --repo $API_REPO_SLUG --body-file $REVIEW_FILE"
+echo "Fallback: to post the review as a regular PR timeline comment, pipe the output above with:"
+echo "  <script> | gh pr comment $PR_NUMBER --repo $API_REPO_SLUG --body-file /dev/stdin"
+
+if [[ -n "${OUTPUT_DIR:-}" ]]; then
+  SAFE_REPO_SLUG="$(printf '%s' "${API_REPO_SLUG}" | tr '/:' '__' | tr -cd 'A-Za-z0-9._-')"
+  PERSIST_DIR="${OUTPUT_DIR%/}/${SAFE_REPO_SLUG}"
+  mkdir -p "$PERSIST_DIR"
+  cp "$REVIEW_FILE"              "$PERSIST_DIR/" 2>/dev/null || true
+  cp "$REVIEW_INPUT_FILE"        "$PERSIST_DIR/" 2>/dev/null || true
+  cp "$USAGE_FILE"               "$PERSIST_DIR/" 2>/dev/null || true
+  cp "$INLINE_COMMENTS_JSON_FILE"  "$PERSIST_DIR/" 2>/dev/null || true
+  cp "$INLINE_REVIEW_PAYLOAD_FILE" "$PERSIST_DIR/" 2>/dev/null || true
+  echo ""
+  echo "Outputs saved to: $PERSIST_DIR"
+fi
