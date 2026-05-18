@@ -30,26 +30,6 @@ comment review owner/repo 123
 - `comment review`: gera a review e posta no GitHub.
 - modo legado `./review-pr.sh owner/repo 123`: mantém compatibilidade e não posta por padrão.
 
-## Correção incluída nesta versão
-
-Quando o Claude retorna:
-
-```json
-{"status":"accepted","comments":[]}
-```
-
-O modo `comment review` agora posta uma review no GitHub com o corpo:
-
-```text
-Review aceita. Nenhum problema bloqueante encontrado.
-```
-
-O texto pode ser alterado com:
-
-```bash
-ACCEPTED_REVIEW_BODY="LGTM. Nenhum problema bloqueante encontrado." ./review-pr.sh comment review owner/repo 123
-```
-
 ## Estrutura
 
 ```text
@@ -58,18 +38,6 @@ prompts/review_system_prompt.md
 py/parse_review_result.py
 .env.example
 outputs/
-```
-
-Nesta primeira etapa de refatoração, o prompt saiu do Bash e o parser da resposta do Claude foi isolado em Python. O restante do fluxo foi mantido para reduzir risco de regressão.
-
-## Variáveis principais
-
-Consulte `.env.example`.
-
-Obrigatória:
-
-```env
-ANTHROPIC_API_KEY=...
 ```
 
 Jira é opcional. Quando `JIRA_BASE_URL`, `JIRA_EMAIL` e `JIRA_API_TOKEN` existem, o script tenta buscar a issue detectada na PR. Caso contrário, inclui no contexto que Jira não foi buscado.
