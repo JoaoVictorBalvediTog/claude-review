@@ -176,7 +176,6 @@ def main() -> int:
                 f"**File:** {comment['path']}",
                 f"**Line:** {comment['line']}",
                 f"**Side:** {comment['side']}",
-                f"**confidence** {comment['confidence']}",
                 "",
                 comment["body"],
                 "",

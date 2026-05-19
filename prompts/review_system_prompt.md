@@ -89,7 +89,7 @@ If there are comments to leave, output exactly this shape:
       "side": "RIGHT",
       "severity": "blocking",
       "confidence": "high",
-      "body": "Actionable PR review comment. Explain the concrete issue, why it matters, and the minimal fix. Also inform the confidence of the analysis and the severity of the problem. Always in english"
+      "body": "Actionable PR review comment. Explain the concrete issue, why it matters, and the minimal fix."
     }
   ]
 }
