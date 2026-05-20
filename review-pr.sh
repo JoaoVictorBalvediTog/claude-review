@@ -65,8 +65,9 @@ MAX_PR_BODY_CHARS="${MAX_PR_BODY_CHARS:-8000}"
 MAX_APP_CONTEXT_CHARS_PER_FILE="${MAX_APP_CONTEXT_CHARS_PER_FILE:-12000}"
 MAX_CHANGED_FILE_CHARS_PER_FILE="${MAX_CHANGED_FILE_CHARS_PER_FILE:-20000}"
 MAX_CHANGED_FILES_TOTAL_CHARS="${MAX_CHANGED_FILES_TOTAL_CHARS:-120000}"
-CLAUDE_MODEL="${CLAUDE_MODEL:-claude-sonnet-4-5}"
+CLAUDE_MODEL="${CLAUDE_MODEL:-claude-sonnet-4-6}"
 CLAUDE_MAX_TOKENS="${CLAUDE_MAX_TOKENS:-4096}"
+CONFIDENCE_THRESHOLD="${CONFIDENCE_THRESHOLD:-70}"
 
 TMP_DIR="$(mktemp -d)"
 cleanup() {
@@ -228,6 +229,57 @@ print(data.get("baseRefName") or "main")
 PY
 )"
 
+echo "Fetching existing PR inline comments from ${API_REPO_SLUG} PR #${PR_NUMBER}..."
+
+EXISTING_COMMENTS_RAW_FILE="$TMP_DIR/pr-${PR_NUMBER}-existing-comments-raw.json"
+EXISTING_COMMENTS_MD_FILE="$TMP_DIR/pr-${PR_NUMBER}-existing-comments.md"
+
+if gh api \
+  "repos/${API_REPO_SLUG}/pulls/${PR_NUMBER}/comments?per_page=100" \
+  > "$EXISTING_COMMENTS_RAW_FILE" 2>/dev/null; then
+
+  python3 - "$EXISTING_COMMENTS_RAW_FILE" "$EXISTING_COMMENTS_MD_FILE" <<'PY'
+import json
+import sys
+
+raw_path, out_path = sys.argv[1], sys.argv[2]
+
+with open(raw_path, "r", encoding="utf-8") as f:
+    try:
+        comments = json.load(f)
+    except Exception:
+        comments = []
+
+if not isinstance(comments, list):
+    comments = []
+
+lines = ["# Existing PR Inline Comments", ""]
+
+if not comments:
+    lines.append("No existing inline comments on this PR.")
+else:
+    lines.append("Do not create new comments that duplicate or rephrase these:")
+    lines.append("")
+    for c in comments:
+        path = c.get("path", "")
+        line_num = c.get("line") or c.get("original_line") or "?"
+        side = c.get("side", "RIGHT")
+        body = (c.get("body") or "").strip()
+        if len(body) > 300:
+            body = body[:300] + " [...]"
+        lines.append(f"[{path}:{line_num} {side}] {body}")
+
+with open(out_path, "w", encoding="utf-8") as f:
+    f.write("\n".join(lines) + "\n")
+
+print(f"Existing inline comments: {len(comments)}", file=sys.stderr)
+PY
+
+else
+  printf '# Existing PR Inline Comments\n\nCould not fetch existing comments.\n' > "$EXISTING_COMMENTS_MD_FILE"
+  echo "Could not fetch existing PR comments (non-fatal)."
+fi
+
 echo "Fetching PR diff from ${API_REPO_SLUG} PR #${PR_NUMBER}..."
 
 if ! gh pr diff "$PR_NUMBER" \
@@ -325,41 +377,25 @@ for raw in diff:
         continue
 
     if raw.startswith("+") and not raw.startswith("+++"):
-        targets.append({
-            "path": path,
-            "line": new_line,
-            "side": "RIGHT",
-            "kind": "addition",
-            "text": raw[1:181],
-        })
+        targets.append({"path": path, "line": new_line, "side": "RIGHT"})
         new_line += 1
         continue
 
     if raw.startswith("-") and not raw.startswith("---"):
-        targets.append({
-            "path": path,
-            "line": old_line,
-            "side": "LEFT",
-            "kind": "deletion",
-            "text": raw[1:181],
-        })
+        targets.append({"path": path, "line": old_line, "side": "LEFT"})
         old_line += 1
         continue
 
     if raw.startswith(" "):
-        targets.append({
-            "path": path,
-            "line": new_line,
-            "side": "RIGHT",
-            "kind": "context",
-            "text": raw[1:181],
-        })
+        # Context line — track line numbers but don't add as target.
+        # Reviewers almost never comment on unchanged context lines.
         old_line += 1
         new_line += 1
         continue
 
+# Compact JSON (no indent) — targets are addresses only, content is in the diff.
 with open(targets_path, "w", encoding="utf-8") as f:
-    json.dump(targets, f, ensure_ascii=False, indent=2)
+    json.dump(targets, f, ensure_ascii=False, separators=(",", ":"))
 
 print(f"Inline review targets saved to: {targets_path}")
 print(f"Inline review target count: {len(targets)}")
@@ -861,6 +897,9 @@ PY
   cat "$TMP_DIR/pr-context.md"
   echo
   echo "---"
+  cat "$EXISTING_COMMENTS_MD_FILE"
+  echo
+  echo "---"
   printf '%s\n' "$JIRA_CONTEXT_TEXT"
   echo
   echo "---"
@@ -896,6 +935,54 @@ if [[ ! -f "$REVIEW_PROMPT_FILE" ]]; then
 fi
 
 REVIEW_PROMPT="$(cat "$REVIEW_PROMPT_FILE")"
+
+# ── Context summary ────────────────────────────────────────────────────────────
+CHANGED_FILES_COUNT="$(wc -l < "$CHANGED_FILES_LIST" | tr -d ' ')"
+INPUT_SIZE="$(wc -c < "$REVIEW_INPUT_FILE" | tr -d ' ')"
+APPROX_TOKENS="$((INPUT_SIZE / 4))"
+
+echo ""
+echo "┌─────────────────────────────────────────────────┐"
+echo "│              Context sent to Claude             │"
+echo "└─────────────────────────────────────────────────┘"
+echo ""
+echo "  PR changed files (${CHANGED_FILES_COUNT}):"
+while IFS=$'\t' read -r _path _change_type _additions _deletions; do
+  [[ -z "$_path" ]] && continue
+  printf "    • %-50s  [%s] +%s/-%s\n" \
+    "$_path" "${_change_type:-unknown}" "${_additions:-?}" "${_deletions:-?}"
+done < "$CHANGED_FILES_LIST"
+
+echo ""
+if [[ -n "${APP_CONTEXT_FILES:-}" ]]; then
+  echo "  App context files: ${APP_CONTEXT_FILES}"
+else
+  echo "  App context files: none (APP_CONTEXT_FILES not set)"
+fi
+
+echo "  Jira key: ${SELECTED_JIRA_KEY:-not found}"
+EXISTING_COUNT="$(python3 -c "
+import json, sys
+try:
+    d = json.load(open('${EXISTING_COMMENTS_RAW_FILE}'))
+    print(len(d) if isinstance(d, list) else 0)
+except Exception:
+    print(0)
+" 2>/dev/null || echo "0")"
+echo "  Existing PR comments: ${EXISTING_COUNT} (passed to Claude for dedup)"
+echo ""
+echo "  Input size      : ${INPUT_SIZE} bytes"
+echo "  Est. tokens     : ~${APPROX_TOKENS}"
+echo "  Model           : ${CLAUDE_MODEL}"
+echo "  Max out tokens  : ${CLAUDE_MAX_TOKENS}"
+echo "  Conf. threshold : ${CONFIDENCE_THRESHOLD}/100 (comments below are discarded)"
+echo ""
+echo "  Note: Anthropic API balance is not exposed via API."
+echo "        Check it at: https://console.anthropic.com/settings/billing"
+echo ""
+echo "──────────────────────────────────────────────────────"
+echo ""
+# ──────────────────────────────────────────────────────────────────────────────
 
 echo "Running Claude review via Anthropic API (model: ${CLAUDE_MODEL})..."
 
@@ -969,10 +1056,67 @@ python3 "${SCRIPT_DIR}/py/parse_review_result.py" \
 
 cat "$REVIEW_FILE"
 
+# ── Token usage + diagnostics ─────────────────────────────────────────────────
+if [[ -f "$USAGE_FILE" ]]; then
+  echo ""
+  echo "┌─────────────────────────────────────────────────┐"
+  echo "│               Token Usage & Status              │"
+  echo "└─────────────────────────────────────────────────┘"
+
+  _model_line="$(grep -m1 "^- Model:" "$USAGE_FILE" 2>/dev/null || true)"
+  _stop_line="$(grep -m1 "^- Stop reason:" "$USAGE_FILE" 2>/dev/null || true)"
+  _input_tok="$(grep -m1 "^- input_tokens:" "$USAGE_FILE" 2>/dev/null || true)"
+  _output_tok="$(grep -m1 "^- output_tokens:" "$USAGE_FILE" 2>/dev/null || true)"
+  _cache_write="$(grep -m1 "^- cache_creation_input_tokens:" "$USAGE_FILE" 2>/dev/null || true)"
+  _cache_read="$(grep -m1 "^- cache_read_input_tokens:" "$USAGE_FILE" 2>/dev/null || true)"
+  _approx_tok="$(grep -m1 "^- Approx input tokens:" "$USAGE_FILE" 2>/dev/null || true)"
+  _json_parse="$(grep -m1 "^- Claude JSON parse status:" "$USAGE_FILE" 2>/dev/null || true)"
+  _comment_parse="$(grep -m1 "^- Inline comment JSON parse status:" "$USAGE_FILE" 2>/dev/null || true)"
+  _valid="$(grep -m1 "^- Valid inline comments:" "$USAGE_FILE" 2>/dev/null || true)"
+  _low_conf="$(grep -m1 "^- Discarded (low confidence):" "$USAGE_FILE" 2>/dev/null || true)"
+  _other_disc="$(grep -m1 "^- Discarded (other reasons):" "$USAGE_FILE" 2>/dev/null || true)"
+
+  [[ -n "$_model_line"   ]] && echo "  ${_model_line#- }"
+  [[ -n "$_stop_line"    ]] && echo "  ${_stop_line#- }"
+  echo ""
+  [[ -n "$_approx_tok"   ]] && echo "  ${_approx_tok#- } (script estimate)"
+  [[ -n "$_input_tok"    ]] && echo "  ${_input_tok#- } (reported by API)"
+  [[ -n "$_output_tok"   ]] && echo "  ${_output_tok#- }"
+  [[ -n "$_cache_write"  ]] && echo "  ${_cache_write#- }"
+  [[ -n "$_cache_read"   ]] && echo "  ${_cache_read#- }"
+  echo ""
+  [[ -n "$_valid"        ]] && echo "  ${_valid#- }"
+  [[ -n "$_low_conf"     ]] && echo "  ${_low_conf#- }"
+  [[ -n "$_other_disc"   ]] && echo "  ${_other_disc#- }"
+
+  # Highlight parse errors — these are the silent killers of reviews
+  _json_fail=0
+  if [[ "$_json_parse" == *"FAILED"* ]]; then
+    echo ""
+    echo "  ⚠️  Claude API response JSON parse FAILED:"
+    echo "     ${_json_parse#- Claude JSON parse status: }"
+    _json_fail=1
+  fi
+  if [[ "$_comment_parse" == *"FAILED"* ]]; then
+    echo ""
+    echo "  ⚠️  Review comment JSON parse FAILED — Claude may have added prose around the JSON:"
+    echo "     ${_comment_parse#- Inline comment JSON parse status: }"
+    echo "     Tip: set OUTPUT_DIR=<path> to save the raw Claude response for inspection."
+    _json_fail=1
+  fi
+  if [[ "$_json_fail" == "0" ]]; then
+    echo ""
+    echo "  ✓  JSON parsed successfully"
+  fi
+
+  echo ""
+  echo "  Full usage log + raw Claude response: set OUTPUT_DIR=<path> to persist"
+  echo "──────────────────────────────────────────────────────"
+  echo ""
+fi
+# ──────────────────────────────────────────────────────────────────────────────
 
 INLINE_COMMENT_COUNT="$(cat "$TMP_DIR/inline-comment-count.txt" 2>/dev/null || echo "0")"
-
-REVIEW_STATUS="$(cat "$REVIEW_STATUS_FILE" 2>/dev/null || echo "accepted")"
 
 if [[ "$CLAUDE_EXIT" -eq 0 ]]; then
   if [[ "$POST_INLINE_COMMENTS" == "1" ]]; then
