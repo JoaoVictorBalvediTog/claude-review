@@ -143,20 +143,24 @@ def main() -> int:
         print("Error: ANTHROPIC_API_KEY is not set.", file=sys.stderr)
         return 1
 
-    # ── Get authenticated GitHub user ──────────────────────────────────────────
-    user_raw, err = gh("api", "user", "--jq", ".login")
-    if not user_raw:
-        print(f"Could not get authenticated GitHub user: {err}", file=sys.stderr)
-        return 1
-    authed_user = user_raw.strip()
-    print(f"Authenticated as: @{authed_user}")
-
-    # Resolve which login originally posted the review comments.
-    # When running inside GitHub Actions the reviews are posted by github-actions[bot],
-    # not by the authenticated user — REVIEWER_LOGIN bridges that gap.
-    reviewer_login = REVIEWER_LOGIN or authed_user
-    if reviewer_login != authed_user:
+    # ── Resolve reviewer login ────────────────────────────────────────────────
+    # In GitHub Actions, GITHUB_TOKEN is an installation token and may not be able
+    # to call `gh api user`. In reply mode we already know who posted the original
+    # review comment: usually github-actions[bot].
+    if REVIEWER_LOGIN:
+        authed_user = os.environ.get("GITHUB_ACTOR", "github-actions[bot]").strip() or "github-actions[bot]"
+        reviewer_login = REVIEWER_LOGIN
+        print(f"Running as GitHub actor: @{authed_user}")
         print(f"Looking for threads by: @{reviewer_login} (REVIEWER_LOGIN override)")
+    else:
+        # Local/dev fallback: only call /user when no explicit reviewer login was provided.
+        user_raw, err = gh("api", "user", "--jq", ".login")
+        if not user_raw:
+            print(f"Could not get authenticated GitHub user: {err}", file=sys.stderr)
+            return 1
+        authed_user = user_raw.strip()
+        reviewer_login = authed_user
+        print(f"Authenticated as: @{authed_user}")
 
     # ── Fetch PR review comments ───────────────────────────────────────────────
     print(f"Fetching review comments for {repo_slug} PR #{pr_number}...")
